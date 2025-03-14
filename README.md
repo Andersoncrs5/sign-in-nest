@@ -5,8 +5,7 @@ This project implements a sign-in system using NestJS with user CRUD functionali
 It allows users to register, log in, update, and delete their accounts, with input 
 validation handled by class-validator.
 
-Technologies Used:
-
+## Technologies Used:
 
 NestJS: Framework for building the server-side application.
 
@@ -20,8 +19,7 @@ TypeORM: ORM for interacting with the PostgreSQL database.
 
 class-validator: Used for validating user input during registration and login.
 
-Features:
-
+## Features:
 
 User registration with hashed passwords.
 
@@ -31,6 +29,12 @@ CRUD operations for user data.
 
 Input validation for user data using class-validator.
 
+## use command :
 
-  npm install @nestjs/core @nestjs/common @nestjs/platform-fastify @nestjs/typeorm @nestjs/swagger class-validator class-transformer fastify @fastify/static typeorm pg crypto
+    npm install 
+
+## new Features :
+
+  JWT 
+  more validation
 

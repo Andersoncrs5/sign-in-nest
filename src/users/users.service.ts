@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, InternalServerErrorException, UnauthorizedException } from '@nestjs/common';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -6,15 +6,17 @@ import { Repository } from 'typeorm';
 import { User } from './entities/user.entity';
 import { LoginUserDTO } from './dto/login-user.dto';
 import { CryptoService } from 'src/CryptoService';
+import { JwtService } from '@nestjs/jwt';
 
 @Injectable()
 export class UsersService {
   constructor(
     @InjectRepository(User)
     private readonly repository: Repository<User>,
+    private readonly jwtService: JwtService,
   ) {}
 
-  async createAsync(createUserDto: CreateUserDto): Promise<User> {
+  async createAsync(createUserDto: CreateUserDto): Promise<{access_token: string;refresh_token: string;}> {
     const queryRunner = this.repository.manager.connection.createQueryRunner();
     await queryRunner.startTransaction();
 
@@ -24,10 +26,25 @@ export class UsersService {
       await queryRunner.manager.save(user);
 
       await queryRunner.commitTransaction();
-      return user;
+
+      const foundUser : User | null = await queryRunner.manager.findOne(User, { where: { email: user.email  } })
+
+      if (!foundUser) {
+        throw new NotFoundException();
+      }
+
+      const payload = { sub: foundUser.id, email: foundUser.email };
+      const accessToken = this.jwtService.sign(payload); 
+
+      const refreshToken = this.jwtService.sign(payload, { expiresIn: '7d' });
+
+      foundUser.refreshToken = refreshToken;
+      await this.repository.save(foundUser);
+
+      return { access_token: accessToken, refresh_token: refreshToken };
     } catch (error) {
       await queryRunner.rollbackTransaction();
-      throw error;
+      throw new InternalServerErrorException(error) ;
     } finally {
       await queryRunner.release();
     }
@@ -74,7 +91,7 @@ export class UsersService {
       return user;
     } catch (error) {
       await queryRunner.rollbackTransaction();
-      throw error;
+      throw new InternalServerErrorException(error) ;
     } finally {
       await queryRunner.release();
     }
@@ -101,31 +118,75 @@ export class UsersService {
       return 'User deleted';
     } catch (error) {
       await queryRunner.rollbackTransaction();
-      throw error;
+      throw new InternalServerErrorException(error) ;
     } finally {
       await queryRunner.release();
     }
   }
 
-  async LoginAsync(userDto: LoginUserDTO): Promise<boolean> {
+  async LoginAsync(userDto: LoginUserDTO) {
     try {
-      const email = userDto.email;
-      const foundUser = await this.repository.findOne({ where: { email } });
+      const foundUser: User | null = await this.repository.findOne({ where: { email: userDto.email } });
   
       if (!foundUser) {
         return false;
       }
   
-      const isPasswordCorrect = await CryptoService.compare(userDto.password, foundUser.password);
+      const isPasswordCorrect: boolean = await CryptoService.compare(userDto.password, foundUser.password);
   
       if (!isPasswordCorrect) {
         return false;
       }
-  
-      return true;
+
+      const payload = { sub: foundUser.id, email: foundUser.email };
+      const accessToken = this.jwtService.sign(payload); 
+
+      const refreshToken = this.jwtService.sign(payload, { expiresIn: '7d' });
+
+      foundUser.refreshToken = refreshToken;
+      await this.repository.save(foundUser);
+
+      return { access_token: accessToken, refresh_token: refreshToken };
+
     } catch (error) {
-      throw error;
+      throw new InternalServerErrorException(error) ;
     }
   }  
+
+  async logout(userId: number) {
+    const user = await this.repository.findOne({ where: { id: userId } });
+
+    if (!user) {
+      throw new UnauthorizedException('Usuário não encontrado');
+    }
+
+    user.refreshToken = null;
+    await this.repository.save(user);
+
+    return { message: 'Logout realizado com sucesso' };
+  }
+
+  async refreshToken(refreshToken: string) {
+    try {
+      const payload = this.jwtService.verify(refreshToken);
+  
+      const foundUser = await this.repository.findOne({
+        where: { id: payload.sub, refreshToken },
+      });
+  
+      if (!foundUser) {
+        throw new UnauthorizedException('Refresh token inválido');
+      }
+  
+      const newAccessToken = this.jwtService.sign(
+        { sub: foundUser.id, email: foundUser.email }
+      );
+  
+      return { access_token: newAccessToken };
+    } catch (error) {
+      throw new UnauthorizedException('Refresh token inválido ou expirado');
+    }
+  }
+  
 
 }
